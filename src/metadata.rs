@@ -122,3 +122,42 @@ impl Metadata {
         self.read_stats()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn dedup_and_stats_are_correct() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("meta.sled");
+        let meta = Metadata::open(path.to_str().unwrap()).unwrap();
+
+        // fresh state
+        let s0 = meta.stats();
+        assert_eq!(s0.object_count, 0);
+        assert_eq!(s0.logical_bytes, 0);
+        assert_eq!(s0.unique_bytes, 0);
+        assert_eq!(s0.put_count, 0);
+
+        // first put: unique
+        let cid = "cid-hello";
+        let dedup1 = meta.upsert_object(cid, 12).unwrap();
+        assert!(!dedup1);
+        let s1 = meta.stats();
+        assert_eq!(s1.object_count, 1);
+        assert_eq!(s1.logical_bytes, 12);
+        assert_eq!(s1.unique_bytes, 12);
+        assert_eq!(s1.put_count, 1);
+
+        // second put: same cid -> dedup
+        let dedup2 = meta.upsert_object(cid, 12).unwrap();
+        assert!(dedup2);
+        let s2 = meta.stats();
+        assert_eq!(s2.object_count, 1);
+        assert_eq!(s2.logical_bytes, 24);
+        assert_eq!(s2.unique_bytes, 12);
+        assert_eq!(s2.put_count, 2);
+    }
+}

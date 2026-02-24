@@ -60,3 +60,21 @@ impl Storage {
         self.path_for_cid(cid).exists()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn shard_path_uses_first_4_hex_chars() {
+        // fake root, pure path logic test
+        let st = Storage { root: PathBuf::from("/tmp/root") };
+        let cid = "a1b2c3d4e5";
+        let p = st.path_for_cid(cid);
+        let s = p.to_string_lossy();
+
+        // Expected: /tmp/root/objects/a1/b2/a1b2c3d4e5
+        assert!(s.contains("/objects/a1/b2/a1b2c3d4e5"), "got path: {s}");
+    }
+}
