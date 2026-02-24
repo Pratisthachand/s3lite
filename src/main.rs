@@ -1,21 +1,21 @@
 use axum::{
-    extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
-    response::{IntoResponse},
-    routing::{get, head, post},
-    Json, Router,
+    routing::{get, post},
+    Router, Json,
 };
-use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tokio::net::TcpListener;
 
 mod storage;
 mod metadata;
 mod api;
 mod errors;
 
-use api::{upload_object, get_object_by_cid, head_object_by_cid, get_metrics, link_name, resolve_name, unlink_name, get_health};
+use api::{
+    get_health, upload_object, get_object_by_cid, head_object_by_cid,
+    get_metrics, link_name, resolve_name, unlink_name,
+};
 use metadata::Metadata;
 use storage::Storage;
 
@@ -29,7 +29,8 @@ struct AppState {
 async fn main() -> anyhow::Result<()> {
     // Logs: export RUST_LOG=info for verbosity
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "s3lite=info,tower_http=info".into()))
+        .with(tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "s3lite=info,tower_http=info".into()))
         .with(tracing_subscriber::fmt::layer())
         .init();
 
@@ -54,7 +55,8 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = TcpListener::bind(addr).await?;
     info!("S3-Lite listening on http://{addr}");
-    axum::Server::bind(&addr).serve(app.into_make_service()).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }

@@ -1,24 +1,20 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    body::Bytes,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::IntoResponse,
     Json,
 };
-use bytes::Bytes;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio_util::io::ReaderStream;
-use tracing::{error, info};
 
-use crate::{errors::{AppError, Result}, metadata::Metadata, storage::{FinalizeResult, Storage}};
-use std::{path::PathBuf, sync::Arc};
-
-#[derive(Clone)]
-pub struct AppState {
-    pub storage: Arc<Storage>,
-    pub meta: Arc<Metadata>,
-}
+use crate::{
+    errors::{AppError, Result},
+    metadata::Metadata,
+    storage::{FinalizeResult, Storage},
+};
 
 #[derive(Deserialize)]
 pub struct UploadParams {
@@ -39,39 +35,37 @@ pub async fn get_health() -> impl IntoResponse {
 pub async fn upload_object(
     State(state): State<crate::AppState>,
     Query(params): Query<UploadParams>,
-    mut body: axum::extract::BodyStream,
+    bytes: Bytes, // ← entire body (simple & good for midpoint)
 ) -> Result<impl IntoResponse> {
-    // stream to tmp file + compute hash
-    let tmp = state.storage.create_temp().await.map_err(AppError::Internal)?;
+    let tmp = state.storage.create_temp().await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+
+    // write once and hash
+    let size = bytes.len() as u64;
+    state.storage.write_all(tmp.as_path(), &bytes).await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     let mut hasher = Sha256::new();
-    let mut size: u64 = 0;
-
-    while let Some(chunk) = body.next().await {
-        let bytes: Bytes = chunk.map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
-        size += bytes.len() as u64;
-        state.storage.write_all(tmp.as_path(), &bytes).await.map_err(AppError::Internal)?;
-        hasher.update(&bytes);
-    }
-
+    hasher.update(&bytes);
     let cid = hex::encode(hasher.finalize());
-    let finalize = state.storage.finalize(tmp.clone(), &cid).await.map_err(AppError::Internal)?;
 
-    let deduped = match finalize {
-        FinalizeResult::Created(_) => false,
-        FinalizeResult::AlreadyExisted(_) => true,
-    };
+    let finalize = state.storage.finalize(tmp.clone(), &cid).await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    let deduped_disk = matches!(finalize, FinalizeResult::AlreadyExisted(_));
 
-    // Update metadata
-    let deduped_from_meta = state.meta.upsert_object(&cid, size).map_err(AppError::Internal)?;
-    // If file already existed on disk, deduped_from_meta should also be true on second put,
-    // else first put returns false.
+    // Metadata upsert (tracks dedup + stats)
+    let deduped_meta = state.meta.upsert_object(&cid, size)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
-    // If provided, link name -> cid
     if let Some(name) = params.name {
-        state.meta.link_name(&name, &cid).map_err(AppError::Internal)?;
+        state.meta.link_name(&name, &cid)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     }
 
-    Ok((StatusCode::CREATED, Json(UploadResponse { cid, size, deduped: deduped || deduped_from_meta })))
+    Ok((StatusCode::CREATED, Json(UploadResponse {
+        cid,
+        size,
+        deduped: deduped_disk || deduped_meta,
+    })))
 }
 
 pub async fn get_object_by_cid(
@@ -81,13 +75,18 @@ pub async fn get_object_by_cid(
     if !state.storage.exists(&cid) {
         return Err(AppError::NotFound);
     }
-    state.meta.inc_get().map_err(AppError::Internal)?;
+    state.meta.inc_get().map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     let path = state.storage.path_for_cid(&cid);
-    let file = tokio::fs::File::open(&path).await.map_err(AppError::Internal)?;
+    let file = tokio::fs::File::open(&path).await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     let stream = ReaderStream::new(file);
+
     let mut headers = HeaderMap::new();
-    headers.insert(axum::http::header::ETAG, format!("\"sha256-{cid}\"").parse().unwrap());
-    Ok((headers, axum::body::Body::from_stream(stream)))
+    headers.insert(header::ETAG, HeaderValue::from_str(&format!("\"sha256-{cid}\"")).unwrap());
+
+    // Axum 0.7: use Body::from_stream
+    let body = axum::body::Body::from_stream(stream);
+    Ok((headers, body))
 }
 
 pub async fn head_object_by_cid(
@@ -97,11 +96,12 @@ pub async fn head_object_by_cid(
     if !state.storage.exists(&cid) {
         return Err(AppError::NotFound);
     }
-    let rec = state.meta.get_object(&cid).map_err(AppError::Internal)?;
+    let rec = state.meta.get_object(&cid)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     let mut headers = HeaderMap::new();
     if let Some(rec) = rec {
-        headers.insert(axum::http::header::ETAG, format!("\"sha256-{}\"", rec.cid).parse().unwrap());
-        headers.insert(axum::http::header::CONTENT_LENGTH, rec.size.into());
+        headers.insert(header::ETAG, HeaderValue::from_str(&format!("\"sha256-{}\"", rec.cid)).unwrap());
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from_str(&rec.size.to_string()).unwrap());
     }
     Ok((StatusCode::OK, headers))
 }
@@ -142,7 +142,8 @@ pub async fn link_name(
     if !state.storage.exists(&req.cid) {
         return Err(AppError::BadRequest("CID does not exist".into()));
     }
-    state.meta.link_name(&req.name, &req.cid).map_err(AppError::Internal)?;
+    state.meta.link_name(&req.name, &req.cid)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     Ok((StatusCode::CREATED, Json(serde_json::json!({"name": req.name, "cid": req.cid}))))
 }
 
@@ -150,7 +151,7 @@ pub async fn resolve_name(
     State(state): State<crate::AppState>,
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse> {
-    match state.meta.resolve_name(&name).map_err(AppError::Internal)? {
+    match state.meta.resolve_name(&name).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))? {
         Some(cid) => Ok(Json(serde_json::json!({ "name": name, "cid": cid }))),
         None => Err(AppError::NotFound),
     }
@@ -160,7 +161,7 @@ pub async fn unlink_name(
     State(state): State<crate::AppState>,
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse> {
-    let existed = state.meta.unlink_name(&name).map_err(AppError::Internal)?;
+    let existed = state.meta.unlink_name(&name).map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
     if existed {
         Ok((StatusCode::NO_CONTENT, "".into_response()))
     } else {
