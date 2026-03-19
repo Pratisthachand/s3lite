@@ -11,6 +11,7 @@ mod storage;
 mod metadata;
 mod api;
 mod errors;
+mod cli;
 
 use api::{
     get_health, upload_object, get_object_by_cid, head_object_by_cid,
