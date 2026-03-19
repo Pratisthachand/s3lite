@@ -131,7 +131,15 @@ async fn handle_download(cid: String, output: String) -> anyhow::Result<()> {
 }
 
 async fn handle_metrics() -> anyhow::Result<()> {
-    // TODO: Make HTTP GET request to /metrics
+    let client = reqwest::Client::new();
+    let response = client
+        .get("http://localhost:8080/metrics")
+        .send()
+        .await?;
+    
+    let json: serde_json::Value = response.json().await?;
+    println!("{}", serde_json::to_string_pretty(&json)?);
+    
     Ok(())
 }
 
