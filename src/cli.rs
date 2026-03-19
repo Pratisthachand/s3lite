@@ -170,8 +170,10 @@ async fn handle_metrics() -> anyhow::Result<()> {
 }
 
 pub async fn run() -> anyhow::Result<()> {
+    // Parse command-line arguments using clap
     let cli = Cli::parse();
     
+    // Match on the command and call the appropriate handler
     match cli.command {
         Commands::Server { port } => handle_server(port).await,
         Commands::Upload { file, name } => handle_upload(file, name).await,
