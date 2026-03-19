@@ -126,32 +126,27 @@ async fn handle_upload(file: String, name: Option<String>) -> anyhow::Result<()>
 }
 
 async fn handle_download(cid: String, output: String) -> anyhow::Result<()> {
-    // Step 1: Read the file from disk into memory
-    let bytes = tokio::fs::read(&file).await?;
-    println!("Read {} bytes from {}", bytes.len(), file);
-    
-    // Step 2: Create an HTTP client to communicate with the server
+    // Create HTTP client
     let client = reqwest::Client::new();
     
-    // Step 3: Build the URL, adding the optional name as a query parameter
-    // Example: http://localhost:8080/objects?name=myfile.txt
-    let mut url = String::from("http://localhost:8080/objects");
-    if let Some(n) = &name {
-        url.push_str(&format!("?name={}", n));
+    // Build the download URL
+    let url = format!("http://localhost:8080/objects/{}", cid);
+    
+    // Send GET request to download the file
+    let response = client.get(&url).send().await?;
+    
+    // Check if the request was successful (HTTP 200)
+    if response.status() != 200 {
+        anyhow::bail!("Failed to download: {}", response.status());
     }
     
-    // Step 4: Send a POST request with the file bytes as the body
-    let response = client
-        .post(&url)
-        .body(bytes)  // The file content
-        .send()      // Send the request
-        .await?;     // Wait for response
+    // Convert response to bytes
+    let bytes = response.bytes().await?;
     
-    // Step 5: Parse the response as JSON
-    let json: serde_json::Value = response.json().await?;
+    // Write bytes to output file on disk
+    tokio::fs::write(&output, bytes).await?;
     
-    // Step 6: Print the JSON response nicely formatted
-    println!("{}", serde_json::to_string_pretty(&json)?);
+    println!("Downloaded to {}", output);
     
     Ok(())
 }
