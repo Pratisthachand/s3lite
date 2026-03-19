@@ -21,7 +21,7 @@ use metadata::Metadata;
 use storage::Storage;
 
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     storage: Arc<Storage>,
     meta: Arc<Metadata>,
 }
