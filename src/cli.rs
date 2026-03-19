@@ -6,13 +6,13 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use axum::{
     routing::{get, post},
-    Router,
+    Router, Json,
 };
 use crate::api::{
     get_health, upload_object, get_object_by_cid, head_object_by_cid,
     get_metrics, link_name, resolve_name, unlink_name,
 };
-use crate::{Metadata, Storage, AppState};
+use crate::AppState;
 
 #[derive(Parser)]
 #[command(name = "s3lite")]
@@ -96,7 +96,32 @@ enum Commands {
 }
 
 async fn handle_upload(file: String, name: Option<String>) -> anyhow::Result<()> {
-    // TODO: Read file, make HTTP POST request
+    // Step 1: Read file
+    let bytes = tokio::fs::read(&file).await?;
+    println!("Read {} bytes from {}", bytes.len(), file);
+    
+    // Step 2: Create HTTP client
+    let client = reqwest::Client::new();
+    
+    // Step 3: Build URL with query param
+    let mut url = String::from("http://localhost:8080/objects");
+    if let Some(n) = &name {
+        url.push_str(&format!("?name={}", n));
+    }
+    
+    // Step 4: Make POST request
+    let response = client
+        .post(&url)
+        .body(bytes)
+        .send()
+        .await?;
+    
+    // Step 5: Parse response JSON
+    let json: serde_json::Value = response.json().await?;
+    
+    // Step 6: Print nicely
+    println!("{}", serde_json::to_string_pretty(&json)?);
+    
     Ok(())
 }
 
