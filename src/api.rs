@@ -204,3 +204,8 @@ pub async fn unlink_name(
         Err(AppError::NotFound)
     }
 }
+
+// Returns HTML page showing real-time storage statistics
+pub async fn dashboard() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("../static/dashboard.html"))
+}

@@ -10,7 +10,7 @@ use axum::{
 };
 use crate::api::{
     get_health, upload_object_stream, get_object_by_cid, head_object_by_cid,
-    get_metrics, link_name, resolve_name, unlink_name,
+    get_metrics, link_name, resolve_name, unlink_name, dashboard,
 };
 use crate::AppState;
 
@@ -85,6 +85,7 @@ enum Commands {
         .route("/links/:name", get(resolve_name))
         .route("/links/:name", axum::routing::delete(unlink_name))
         .route("/metrics", get(get_metrics))
+        .route("/dashboard", get(dashboard)) 
         .with_state(state)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
