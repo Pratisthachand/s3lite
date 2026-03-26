@@ -150,11 +150,21 @@ pub struct Metrics {
     bytes_saved: i64,
     put_count: u64,
     get_count: u64,
+    savings_percentage: String,
 }
 
 pub async fn get_metrics(State(state): State<crate::AppState>) -> Result<impl IntoResponse> {
     let s = state.meta.stats();
     let saved = s.logical_bytes as i64 - s.unique_bytes as i64;
+
+    // Calculate savings percentage
+    let savings_percentage = if s.logical_bytes > 0 {
+        let pct = ((s.logical_bytes - s.unique_bytes) as f64 / s.logical_bytes as f64) * 100.0;
+        format!("{:.1}%", pct)
+    } else {
+        "0.0%".to_string()
+    };
+
     Ok(Json(Metrics {
         object_count: s.object_count,
         logical_bytes: s.logical_bytes,
@@ -162,6 +172,7 @@ pub async fn get_metrics(State(state): State<crate::AppState>) -> Result<impl In
         bytes_saved: saved,
         put_count: s.put_count,
         get_count: s.get_count,
+        savings_percentage,
     }))
 }
 
