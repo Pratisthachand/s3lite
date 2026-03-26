@@ -14,7 +14,7 @@ mod errors;
 mod cli;
 
 use api::{
-    get_health, upload_object, get_object_by_cid, head_object_by_cid,
+    get_health, upload_object_stream, get_object_by_cid, head_object_by_cid,
     get_metrics, link_name, resolve_name, unlink_name,
 };
 use metadata::Metadata;

@@ -9,7 +9,7 @@ use axum::{
     Router, Json,
 };
 use crate::api::{
-    get_health, upload_object, get_object_by_cid, head_object_by_cid,
+    get_health, upload_object_stream, get_object_by_cid, head_object_by_cid,
     get_metrics, link_name, resolve_name, unlink_name,
 };
 use crate::AppState;
@@ -79,7 +79,7 @@ enum Commands {
 
     let app = Router::new()
         .route("/health", get(get_health))
-        .route("/objects", post(upload_object))
+        .route("/objects", post(upload_object_stream))
         .route("/objects/:cid", get(get_object_by_cid).head(head_object_by_cid))
         .route("/links", post(link_name))
         .route("/links/:name", get(resolve_name))

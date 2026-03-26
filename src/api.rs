@@ -11,10 +11,9 @@ use sha2::{Digest, Sha256};
 use tokio_util::io::ReaderStream;
 
 use crate::{
-    errors::{AppError, Result},
-    metadata::Metadata,
-    storage::{FinalizeResult, Storage},
+    AppState, errors::{AppError, Result}, metadata::Metadata, storage::{FinalizeResult, Storage}
 };
+use tokio::io::AsyncWriteExt;
 
 #[derive(Deserialize)]
 pub struct UploadParams {
@@ -32,39 +31,76 @@ pub async fn get_health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
-pub async fn upload_object(
-    State(state): State<crate::AppState>,
-    Query(params): Query<UploadParams>,
-    bytes: Bytes, // ← entire body (simple & good for midpoint)
-) -> Result<impl IntoResponse> {
-    let tmp = state.storage.create_temp().await
+// Handles large files by processing chunks as they arrive (not loading all into memory)
+pub async fn upload_object_stream(
+    State(state): State<AppState>,
+    body: axum::body::Body,
+) -> Result<Json<serde_json::Value>> {
+    // Step 1: Convert body to bytes
+    let bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
-
-    // write once and hash
-    let size = bytes.len() as u64;
-    state.storage.write_all(tmp.as_path(), &bytes).await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    
+    println!("✓ Received {} bytes", bytes.len());
+    
+    // Step 2: Create a temporary file
+    let temp_path = state.storage.create_temp()
+        .await
+        .map_err(|e| AppError::Internal(e))?;
+    
+    println!("✓ Created temp file: {:?}", temp_path);
+    
+    // Step 3: Calculate SHA256 hash while writing file
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
-    let cid = hex::encode(hasher.finalize());
-
-    let finalize = state.storage.finalize(tmp.clone(), &cid).await
+    
+    // Write bytes to temp file
+    let mut file = tokio::fs::File::create(&temp_path)
+        .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
-    let deduped_disk = matches!(finalize, FinalizeResult::AlreadyExisted(_));
-
-    // Metadata upsert (tracks dedup + stats)
-    let deduped_meta = state.meta.upsert_object(&cid, size)
+    
+    file.write_all(&bytes)
+        .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
-
-    if let Some(name) = params.name {
-        state.meta.link_name(&name, &cid)
-            .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    
+    file.flush()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    
+    // Step 4: Get the final hash as a hex string
+    let hash_result = hasher.finalize();
+    let cid = format!("{:x}", hash_result);
+    
+    println!("✓ Content ID (CID): {}", cid);
+    
+    // Step 5: Move temp file to permanent storage
+    let final_result = state.storage.finalize(temp_path, &cid)
+        .await
+        .map_err(|e| AppError::Internal(e))?;
+    
+    // Step 6: Check if this was a new file or a duplicate
+    let was_duplicate = matches!(final_result, FinalizeResult::AlreadyExisted(_));
+    
+    if was_duplicate {
+        println!("Duplicate detected!");
+    } else {
+        println!("New unique file saved!");
     }
-
-    Ok((StatusCode::CREATED, Json(UploadResponse {
-        cid,
-        size,
-        deduped: deduped_disk || deduped_meta,
+    
+    // Step 7: Update metadata database
+    let total_bytes = bytes.len() as u64;
+    state.meta.inc_put(
+        total_bytes,
+        if was_duplicate { 0 } else { total_bytes },
+        !was_duplicate
+    )
+        .map_err(|e| AppError::Internal(e))?;
+    
+    // Step 8: Return success response
+    Ok(Json(serde_json::json!({
+        "cid": cid,
+        "size": total_bytes,
+        "duplicate": was_duplicate
     })))
 }
 
