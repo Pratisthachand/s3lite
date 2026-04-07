@@ -80,13 +80,17 @@ enum Commands {
     let app = Router::new()
         .route("/health", get(get_health))
         .route("/objects", post(upload_object_stream))
-        .route("/objects/:cid", get(get_object_by_cid).head(head_object_by_cid))
+        .route(
+            "/objects/:cid", 
+            get(get_object_by_cid)
+                .head(head_object_by_cid)
+                .delete(delete_object) 
+        )
         .route("/links", post(link_name))
         .route("/links/:name", get(resolve_name))
         .route("/links/:name", axum::routing::delete(unlink_name))
         .route("/metrics", get(get_metrics))
         .route("/dashboard", get(dashboard)) 
-        .route("/objects/:cid", get(get_object_by_cid).head(head_object_by_cid).delete(delete_object))
         .with_state(state)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
