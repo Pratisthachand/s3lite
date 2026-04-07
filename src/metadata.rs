@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use sled::{Db, IVec};
 use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Context;
+use sled::transaction::{ConflictableTransactionError, TransactionalTree};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ObjectRecord {
@@ -120,6 +121,41 @@ impl Metadata {
 
     pub fn stats(&self) -> Stats {
         self.read_stats()
+    }
+
+    pub fn dec_ref(&self, cid: &str) -> anyhow::Result<bool> {
+        // We perform the transaction on the 'objects' tree specifically
+        let should_delete = self.objects.transaction(|tx_objects| {
+            // Use .get() on the transactional tree
+            if let Some(existing) = tx_objects.get(cid)? {
+                let mut rec: ObjectRecord = serde_json::from_slice(&existing)
+                    .map_err(|_| ConflictableTransactionError::Abort(anyhow::anyhow!("Parse error")))?;
+
+                if rec.ref_count <= 1 {
+                    // Last person using the file, delete metadata
+                    tx_objects.remove(cid)?;
+                    Ok(true) 
+                } else {
+                    // Just lower the count
+                    rec.ref_count -= 1;
+                    let bytes = serde_json::to_vec(&rec)
+                        .map_err(|_| ConflictableTransactionError::Abort(anyhow::anyhow!("Serialize error")))?;
+                    tx_objects.insert(cid, bytes)?;
+                    Ok(false)
+                }
+            } else {
+                Ok(false)
+            }
+        }).map_err(|e| anyhow::anyhow!("Transaction failed: {}", e))?;
+
+        // Update global stats outside the transaction to avoid E0599/E0277 errors
+        if should_delete {
+            let mut s = self.read_stats();
+            s.object_count = s.object_count.saturating_sub(1);
+            let _ = self.write_stats(&s);
+        }
+
+        Ok(should_delete)
     }
 }
 
