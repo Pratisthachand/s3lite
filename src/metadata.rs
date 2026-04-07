@@ -123,6 +123,7 @@ impl Metadata {
         self.read_stats()
     }
 
+    //Ensures physical files are only marked for deletion when the final reference is removed
     pub fn dec_ref(&self, cid: &str) -> anyhow::Result<bool> {
         // We perform the transaction on the 'objects' tree specifically
         let should_delete = self.objects.transaction(|tx_objects| {
