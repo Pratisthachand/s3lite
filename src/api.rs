@@ -220,3 +220,24 @@ pub async fn unlink_name(
 pub async fn dashboard() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../static/dashboard.html"))
 }
+
+/// Handles the deletion of an object by its Content Identifier (CID).
+/// Implements reference-counted garbage collection to prevent accidental data loss.
+pub async fn delete_object(
+    State(state): State<crate::AppState>,
+    Path(cid): Path<String>,
+) -> Result<impl IntoResponse> {
+    // 1. Decrement reference in metadata
+    let should_delete_file = state.meta.dec_ref(&cid)
+        .map_err(|e| AppError::Internal(e))?;
+
+    // 2. If the count hit 0, remove the actual file
+    if should_delete_file {
+        state.storage.delete_physical_file(&cid)
+            .await
+            .map_err(|e| AppError::Internal(e))?;
+        return Ok((StatusCode::OK, "Object fully deleted").into_response());
+    }
+
+    Ok((StatusCode::OK, "Reference removed").into_response())
+}
