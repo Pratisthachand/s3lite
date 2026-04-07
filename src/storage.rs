@@ -59,6 +59,14 @@ impl Storage {
     pub fn exists(&self, cid: &str) -> bool {
         self.path_for_cid(cid).exists()
     }
+
+    pub async fn delete_physical_file(&self, cid: &str) -> anyhow::Result<()> {
+        let path = self.path_for_cid(cid);
+        if path.exists() {
+            tfs::remove_file(path).await?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
