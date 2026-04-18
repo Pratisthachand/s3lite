@@ -239,3 +239,7 @@ pub async fn delete_object(
 
     Ok((StatusCode::OK, "Reference removed").into_response())
 }
+
+pub async fn root_redirect() -> impl IntoResponse {
+    axum::response::Redirect::permanent("/dashboard")
+}

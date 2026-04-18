@@ -3,7 +3,7 @@ use tracing::info;
 use tracing_subscriber::prelude::*;
 use crate::api::{
     get_health, upload_object_stream, get_object_by_cid, head_object_by_cid,
-    get_metrics, link_name, resolve_name, unlink_name, dashboard, delete_object
+    get_metrics, link_name, resolve_name, unlink_name, dashboard, delete_object, root_redirect
 };
 use crate::AppState;
 
@@ -71,6 +71,7 @@ enum Commands {
     let state = AppState { storage, meta };
 
     let app = Router::new()
+        .route("/", get(root_redirect))
         .route("/health", get(get_health))
         .route("/objects", post(upload_object_stream))
         .route(
