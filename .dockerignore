@@ -1,0 +1,14 @@
+fly.toml
+.git/
+target/
+data/
+meta.sled/
+.git/
+.gitignore
+README.md
+*.sled
+*.tmp
+static/
+Dockerfile
+fly.toml
+.DS_Store
