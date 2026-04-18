@@ -1,13 +1,6 @@
 use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::prelude::*;
-use std::sync::Arc;
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
-use axum::{
-    routing::{get, post},
-    Router, Json,
-};
 use crate::api::{
     get_health, upload_object_stream, get_object_by_cid, head_object_by_cid,
     get_metrics, link_name, resolve_name, unlink_name, dashboard, delete_object
@@ -51,7 +44,7 @@ enum Commands {
     Metrics,
 }
 
- async fn handle_server(port: u16) -> anyhow::Result<()> {
+ async fn handle_server(_port: u16) -> anyhow::Result<()> {
     use crate::{storage::Storage, metadata::Metadata};
     use axum::{
         routing::{get, post},
@@ -94,7 +87,7 @@ enum Commands {
         .with_state(state)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
     info!("S3-Lite listening on http://{addr}");
     axum::serve(listener, app).await?;

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use sled::{Db, IVec};
+use sled::Db;
 use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Context;
-use sled::transaction::{ConflictableTransactionError, TransactionalTree};
+use sled::transaction::ConflictableTransactionError;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ObjectRecord {

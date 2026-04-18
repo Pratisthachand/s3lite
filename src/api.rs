@@ -1,17 +1,15 @@
 use axum::{
-    extract::{Path, Query, State},
-    body::Bytes,
+    extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::IntoResponse,
     Json,
 };
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio_util::io::ReaderStream;
 
 use crate::{
-    AppState, errors::{AppError, Result}, metadata::Metadata, storage::{FinalizeResult, Storage}
+    AppState, errors::{AppError, Result}, storage::FinalizeResult
 };
 use tokio::io::AsyncWriteExt;
 
@@ -46,7 +44,7 @@ pub async fn upload_object_stream(
     // Step 2: Create a temporary file
     let temp_path = state.storage.create_temp()
         .await
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
     
     println!("✓ Created temp file: {:?}", temp_path);
     
@@ -76,7 +74,7 @@ pub async fn upload_object_stream(
     // Step 5: Move temp file to permanent storage
     let final_result = state.storage.finalize(temp_path, &cid)
         .await
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
     
     // Step 6: Check if this was a new file or a duplicate
     let was_duplicate = matches!(final_result, FinalizeResult::AlreadyExisted(_));
@@ -94,7 +92,7 @@ pub async fn upload_object_stream(
         if was_duplicate { 0 } else { total_bytes },
         !was_duplicate
     )
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
     
     // Step 8: Return success response
     Ok(Json(serde_json::json!({
@@ -229,13 +227,13 @@ pub async fn delete_object(
 ) -> Result<impl IntoResponse> {
     // 1. Decrement reference in metadata
     let should_delete_file = state.meta.dec_ref(&cid)
-        .map_err(|e| AppError::Internal(e))?;
+        .map_err(AppError::Internal)?;
 
     // 2. If the count hit 0, remove the actual file
     if should_delete_file {
         state.storage.delete_physical_file(&cid)
             .await
-            .map_err(|e| AppError::Internal(e))?;
+            .map_err(AppError::Internal)?;
         return Ok((StatusCode::OK, "Object fully deleted").into_response());
     }
 
