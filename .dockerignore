@@ -8,7 +8,6 @@ meta.sled/
 README.md
 *.sled
 *.tmp
-static/
 Dockerfile
 fly.toml
 .DS_Store
